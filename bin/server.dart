@@ -1,35 +1,78 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart';
 import 'package:shelf_router/shelf_router.dart';
 
-// Configure routes.
-final _router =
-    Router()
-      ..get('/', _rootHandler)
-      ..get('/echo/<message>', _echoHandler);
+final users = <Map<String, String>>[];
 
-Response _rootHandler(Request req) {
-  return Response.ok('Hello, World!\n');
-}
+void main() async {
+  final router = Router();
 
-Response _echoHandler(Request request) {
-  final message = request.params['message'];
-  return Response.ok('$message\n');
-}
+  // Тестовая ручка
+  router.get('/ping', (Request request) {
+    return Response.ok(
+      jsonEncode({'response': 'pong'}),
+      headers: {'Content-Type': 'application/json'},
+    );
+  });
 
-void main(List<String> args) async {
-  // Use any available host or container IP (usually `0.0.0.0`).
-  final ip = InternetAddress.anyIPv4;
+  // Регистрация
+  router.post('/register', (Request request) async {
+    final body = await request.readAsString();
+    final data = jsonDecode(body);
 
-  // Configure a pipeline that logs requests.
-  final handler = Pipeline()
+    final email = data['email'];
+    final password = data['password'];
+
+    final exists = users.any((u) => u['email'] == email);
+    if (exists) {
+      return Response(
+        400,
+        body: jsonEncode({'error': 'Пользователь уже существует'}),
+        headers: {'Content-Type': 'application/json'},
+      );
+    }
+
+    users.add({'email': email, 'password': password});
+    return Response.ok(
+      jsonEncode({'message': 'Пользователь зарегистрирован'}),
+      headers: {'Content-Type': 'application/json'},
+    );
+  });
+
+  // Логин
+  router.post('/login', (Request request) async {
+    final body = await request.readAsString();
+    final data = jsonDecode(body);
+
+    final email = data['email'];
+    final password = data['password'];
+
+    final user = users.firstWhere(
+      (u) => u['email'] == email && u['password'] == password,
+      orElse: () => {},
+    );
+
+    if (user.isEmpty) {
+      return Response(
+        401,
+        body: jsonEncode({'error': 'Неверный email или пароль'}),
+        headers: {'Content-Type': 'application/json'},
+      );
+    }
+
+    return Response.ok(
+      jsonEncode({'message': 'Вход выполнен'}),
+      headers: {'Content-Type': 'application/json'},
+    );
+  });
+
+  final handler = const Pipeline()
       .addMiddleware(logRequests())
-      .addHandler(_router.call);
+      .addHandler(router);
 
-  // For running in containers, we respect the PORT environment variable.
-  final port = int.parse(Platform.environment['PORT'] ?? '8080');
-  final server = await serve(handler, ip, port);
-  print('Server listening on port ${server.port}');
+  final server = await serve(handler, InternetAddress.anyIPv4, 8080);
+  print('✅ Сервер запущен на http://${server.address.host}:${server.port}');
 }
